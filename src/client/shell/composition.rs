@@ -97,6 +97,12 @@ impl ClientShellState {
                 &mut self.hits,
             );
         }
+        super::city_navigation::render_city_launcher(
+            &mut buffer,
+            sidebar,
+            &self.config,
+            &mut self.hits,
+        );
         if !self.config.mouse_capture {
             self.hits = ShellHitMap::default();
         }
@@ -147,6 +153,179 @@ impl ClientShellState {
         FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
     }
 
+    pub(super) fn compose_client_overlay(
+        &mut self,
+        frame: &mut FrameData,
+        occlusion: &mut crate::kitty_graphics::surface::Occlusion,
+    ) -> Option<()> {
+        if let Some(overlay) = self.overlay.as_ref() {
+            let snapshot = self.snapshot.as_deref()?;
+            let mut composed = frame.to_ratatui_buffer()?;
+            let cursor = if let ClientShellOverlay::ContextMenu(menu) = overlay {
+                let rendered =
+                    render::render_context_menu(&mut composed, menu, &self.config.palette)?;
+                occlusion.cover(rendered.area);
+                self.hits.context_menu_rows = rendered.menu_rows;
+                None
+            } else if let ClientShellOverlay::GlobalMenu(menu) = overlay {
+                let rendered = render::render_global_menu(
+                    &mut composed,
+                    self.hits.global_launcher,
+                    menu,
+                    snapshot,
+                    &self.config.palette,
+                )?;
+                occlusion.cover(rendered.area);
+                self.hits.global_menu_rows = rendered.menu_rows;
+                None
+            } else {
+                let rendered = render::render_client_overlay(
+                    &mut composed,
+                    overlay,
+                    snapshot,
+                    &self.endpoints,
+                    &self.active_endpoint_id,
+                    &self.config.keybinds,
+                    &self.config.palette,
+                )?;
+                occlusion.cover(rendered.area);
+                self.hits.overlay_primary = rendered.primary;
+                self.hits.overlay_clear = rendered.clear;
+                self.hits.overlay_cancel = rendered.cancel;
+                self.hits.navigator_popup = rendered.navigator_popup;
+                self.hits.navigator_search = rendered.navigator_search;
+                self.hits.navigator_rows = rendered.navigator_rows;
+                self.hits.navigator_scrollbar = rendered.navigator_scrollbar;
+                self.hits.navigator_scroll_metrics = rendered.navigator_scroll_metrics;
+                self.hits.worktree_search = rendered.worktree_search;
+                self.hits.worktree_rows = rendered.worktree_rows;
+                self.hits.help_popup = rendered.help_popup;
+                self.hits.help_scrollbar = rendered.help_scrollbar;
+                self.hits.help_scroll_metrics = rendered.help_scroll_metrics;
+                self.hits.help_max_scroll = rendered.help_max_scroll;
+                self.hits.settings_popup = rendered.settings_popup;
+                self.hits.settings_tabs = rendered.settings_tabs;
+                self.hits.settings_choices = rendered.settings_choices;
+                self.hits.product_announcement_scrollbar = rendered.product_announcement_scrollbar;
+                self.hits.product_announcement_scroll_metrics =
+                    rendered.product_announcement_scroll_metrics;
+                self.hits.product_announcement_max_scroll =
+                    rendered.product_announcement_max_scroll;
+                self.hits.release_notes_scrollbar = rendered.release_notes_scrollbar;
+                self.hits.release_notes_scroll_metrics = rendered.release_notes_scroll_metrics;
+                self.hits.release_notes_max_scroll = rendered.release_notes_max_scroll;
+                rendered.cursor
+            };
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
+        }
+        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
+            help.scroll = help.scroll.min(self.hits.help_max_scroll);
+        }
+        if let Some(ClientShellOverlay::ProductAnnouncement(announcement)) = self.overlay.as_mut() {
+            announcement.scroll = announcement
+                .scroll
+                .min(u16::try_from(self.hits.product_announcement_max_scroll).unwrap_or(u16::MAX));
+        }
+        if let Some(ClientShellOverlay::ReleaseNotes(notes)) = self.overlay.as_mut() {
+            notes.scroll = notes
+                .scroll
+                .min(u16::try_from(self.hits.release_notes_max_scroll).unwrap_or(u16::MAX));
+        }
+        Some(())
+    }
+
+    pub(super) fn compose_notifications(
+        &mut self,
+        frame: &mut FrameData,
+        layout: ClientShellLayout,
+        cols: u16,
+        rows: u16,
+        occlusion: &mut crate::kitty_graphics::surface::Occlusion,
+    ) -> Option<(bool, Option<(String, ClientEndpointStatus)>)> {
+        self.hits.notification_toast = Rect::default();
+        let has_config_diagnostic = self.config_diagnostic.is_some();
+        let active_lifecycle = self
+            .endpoints
+            .iter()
+            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
+            .filter(|endpoint| endpoint.status != ClientEndpointStatus::Online)
+            .map(|endpoint| (endpoint.label.clone(), endpoint.status));
+        if has_config_diagnostic
+            || active_lifecycle.is_some()
+            || self.visible_endpoint_notice.is_some()
+            || self.visible_notification.is_some()
+        {
+            let cursor = frame.cursor.clone();
+            let mut composed = frame.to_ratatui_buffer()?;
+            if let Some(diagnostic) = self.config_diagnostic.as_deref() {
+                let diagnostic_area = if layout.mobile_header.is_empty() {
+                    Rect::new(0, 0, cols, rows)
+                } else {
+                    layout.pane_surface
+                };
+                crate::ui::render_config_diagnostic_buffer(
+                    &mut composed,
+                    diagnostic_area,
+                    diagnostic,
+                    &self.config.palette,
+                    |rect| occlusion.cover(rect),
+                );
+            }
+            let lifecycle_offset = active_lifecycle.as_ref().map_or(0, |(label, status)| {
+                occlusion.cover(endpoint_notices::render_lifecycle_banner(
+                    &mut composed,
+                    Rect::new(0, 0, cols, rows),
+                    label,
+                    *status,
+                    u16::from(has_config_diagnostic) + layout.mobile_header.height,
+                    &self.config.palette,
+                ));
+                1
+            });
+            if let Some(notice) = self.visible_endpoint_notice.as_ref() {
+                self.hits.notification_toast = if layout.mobile_header.is_empty() {
+                    endpoint_notices::render_notice(
+                        &mut composed,
+                        Rect::new(0, 0, cols, rows),
+                        notice,
+                        u16::from(has_config_diagnostic) + lifecycle_offset,
+                        &self.config.palette,
+                    )
+                } else {
+                    endpoint_notices::render_mobile_banner(
+                        &mut composed,
+                        Rect::new(0, 0, cols, rows),
+                        notice,
+                        has_config_diagnostic || lifecycle_offset > 0,
+                        &self.config.palette,
+                    )
+                };
+            } else if let Some(notification) = self.visible_notification.as_ref() {
+                self.hits.notification_toast = if layout.mobile_header.is_empty() {
+                    notifications::render_visible_notification(
+                        &mut composed,
+                        Rect::new(0, 0, cols, rows),
+                        notification,
+                        self.config.toast_position,
+                        u16::from(has_config_diagnostic) + lifecycle_offset,
+                        &self.config.palette,
+                    )
+                } else {
+                    notifications::render_mobile_notification_banner(
+                        &mut composed,
+                        Rect::new(0, 0, cols, rows),
+                        notification,
+                        has_config_diagnostic || lifecycle_offset > 0,
+                        &self.config.palette,
+                    )
+                };
+            }
+            occlusion.cover(self.hits.notification_toast);
+            frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
+        }
+        Some((has_config_diagnostic, active_lifecycle))
+    }
+
     pub(crate) fn compose(
         &mut self,
         cols: u16,
@@ -158,7 +337,13 @@ impl ClientShellState {
             self.reveal_navigation_workspace = true;
             self.reveal_mobile_workspace = true;
         }
+        if self.last_composed_size != Some((cols, rows)) {
+            self.city_reveal_selection = true;
+        }
         self.last_composed_size = Some((cols, rows));
+        if self.city.is_some() {
+            return self.compose_city(cols, rows);
+        }
         let valid_navigation_target = self.mode == ClientShellMode::Navigate
             && self
                 .navigate_workspace_id
@@ -451,87 +636,8 @@ impl ClientShellState {
             }
         }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
-        self.hits.notification_toast = Rect::default();
-        let has_config_diagnostic = self.config_diagnostic.is_some();
-        let active_lifecycle = self
-            .endpoints
-            .iter()
-            .find(|endpoint| endpoint.endpoint_id == self.active_endpoint_id)
-            .filter(|endpoint| endpoint.status != ClientEndpointStatus::Online)
-            .map(|endpoint| (endpoint.label.clone(), endpoint.status));
-        if has_config_diagnostic
-            || active_lifecycle.is_some()
-            || self.visible_endpoint_notice.is_some()
-            || self.visible_notification.is_some()
-        {
-            let cursor = frame.cursor.clone();
-            let mut composed = frame.to_ratatui_buffer()?;
-            if let Some(diagnostic) = self.config_diagnostic.as_deref() {
-                let diagnostic_area = if layout.mobile_header.is_empty() {
-                    Rect::new(0, 0, cols, rows)
-                } else {
-                    layout.pane_surface
-                };
-                crate::ui::render_config_diagnostic_buffer(
-                    &mut composed,
-                    diagnostic_area,
-                    diagnostic,
-                    &self.config.palette,
-                    |rect| occlusion.cover(rect),
-                );
-            }
-            let lifecycle_offset = active_lifecycle.as_ref().map_or(0, |(label, status)| {
-                occlusion.cover(endpoint_notices::render_lifecycle_banner(
-                    &mut composed,
-                    Rect::new(0, 0, cols, rows),
-                    label,
-                    *status,
-                    u16::from(has_config_diagnostic) + layout.mobile_header.height,
-                    &self.config.palette,
-                ));
-                1
-            });
-            if let Some(notice) = self.visible_endpoint_notice.as_ref() {
-                self.hits.notification_toast = if layout.mobile_header.is_empty() {
-                    endpoint_notices::render_notice(
-                        &mut composed,
-                        Rect::new(0, 0, cols, rows),
-                        notice,
-                        u16::from(has_config_diagnostic) + lifecycle_offset,
-                        &self.config.palette,
-                    )
-                } else {
-                    endpoint_notices::render_mobile_banner(
-                        &mut composed,
-                        Rect::new(0, 0, cols, rows),
-                        notice,
-                        has_config_diagnostic || lifecycle_offset > 0,
-                        &self.config.palette,
-                    )
-                };
-            } else if let Some(notification) = self.visible_notification.as_ref() {
-                self.hits.notification_toast = if layout.mobile_header.is_empty() {
-                    notifications::render_visible_notification(
-                        &mut composed,
-                        Rect::new(0, 0, cols, rows),
-                        notification,
-                        self.config.toast_position,
-                        u16::from(has_config_diagnostic) + lifecycle_offset,
-                        &self.config.palette,
-                    )
-                } else {
-                    notifications::render_mobile_notification_banner(
-                        &mut composed,
-                        Rect::new(0, 0, cols, rows),
-                        notification,
-                        has_config_diagnostic || lifecycle_offset > 0,
-                        &self.config.palette,
-                    )
-                };
-            }
-            occlusion.cover(self.hits.notification_toast);
-            frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
-        }
+        let (has_config_diagnostic, active_lifecycle) =
+            self.compose_notifications(&mut frame, layout, cols, rows, &mut occlusion)?;
         if let Some(feedback) = self.copy_feedback.as_ref() {
             let cursor = frame.cursor.clone();
             let mut composed = frame.to_ratatui_buffer()?;
@@ -559,7 +665,11 @@ impl ClientShellState {
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
         self.hits.popup = None;
-        if let Some(popup) = surface.popup.as_deref() {
+        if let Some(popup) = self
+            .pane_surface
+            .as_ref()
+            .and_then(|surface| surface.popup.as_deref())
+        {
             let width = popup.width.map(client_popup_size);
             let height = popup.height.map(client_popup_size);
             if let Some(geometry) =
@@ -603,7 +713,7 @@ impl ClientShellState {
             super::mobile::render_mobile_switcher(
                 &mut composed,
                 Rect::new(0, 0, cols, rows),
-                snapshot,
+                self.snapshot.as_deref()?,
                 &self.endpoints,
                 &self.active_endpoint_id,
                 &self.config,
@@ -642,78 +752,7 @@ impl ClientShellState {
         if let Some(bar) = mode_bar {
             occlusion.cover(bar);
         }
-        if let Some(overlay) = self.overlay.as_ref() {
-            let mut composed = frame.to_ratatui_buffer()?;
-            let cursor = if let ClientShellOverlay::ContextMenu(menu) = overlay {
-                let rendered =
-                    render::render_context_menu(&mut composed, menu, &self.config.palette)?;
-                occlusion.cover(rendered.area);
-                self.hits.context_menu_rows = rendered.menu_rows;
-                None
-            } else if let ClientShellOverlay::GlobalMenu(menu) = overlay {
-                let rendered = render::render_global_menu(
-                    &mut composed,
-                    self.hits.global_launcher,
-                    menu,
-                    snapshot,
-                    &self.config.palette,
-                )?;
-                occlusion.cover(rendered.area);
-                self.hits.global_menu_rows = rendered.menu_rows;
-                None
-            } else {
-                let rendered = render::render_client_overlay(
-                    &mut composed,
-                    overlay,
-                    snapshot,
-                    &self.endpoints,
-                    &self.active_endpoint_id,
-                    &self.config.keybinds,
-                    &self.config.palette,
-                )?;
-                occlusion.cover(rendered.area);
-                self.hits.overlay_primary = rendered.primary;
-                self.hits.overlay_clear = rendered.clear;
-                self.hits.overlay_cancel = rendered.cancel;
-                self.hits.navigator_popup = rendered.navigator_popup;
-                self.hits.navigator_search = rendered.navigator_search;
-                self.hits.navigator_rows = rendered.navigator_rows;
-                self.hits.navigator_scrollbar = rendered.navigator_scrollbar;
-                self.hits.navigator_scroll_metrics = rendered.navigator_scroll_metrics;
-                self.hits.worktree_search = rendered.worktree_search;
-                self.hits.worktree_rows = rendered.worktree_rows;
-                self.hits.help_popup = rendered.help_popup;
-                self.hits.help_scrollbar = rendered.help_scrollbar;
-                self.hits.help_scroll_metrics = rendered.help_scroll_metrics;
-                self.hits.help_max_scroll = rendered.help_max_scroll;
-                self.hits.settings_popup = rendered.settings_popup;
-                self.hits.settings_tabs = rendered.settings_tabs;
-                self.hits.settings_choices = rendered.settings_choices;
-                self.hits.product_announcement_scrollbar = rendered.product_announcement_scrollbar;
-                self.hits.product_announcement_scroll_metrics =
-                    rendered.product_announcement_scroll_metrics;
-                self.hits.product_announcement_max_scroll =
-                    rendered.product_announcement_max_scroll;
-                self.hits.release_notes_scrollbar = rendered.release_notes_scrollbar;
-                self.hits.release_notes_scroll_metrics = rendered.release_notes_scroll_metrics;
-                self.hits.release_notes_max_scroll = rendered.release_notes_max_scroll;
-                rendered.cursor
-            };
-            frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
-        }
-        if let Some(ClientShellOverlay::Help(help)) = self.overlay.as_mut() {
-            help.scroll = help.scroll.min(self.hits.help_max_scroll);
-        }
-        if let Some(ClientShellOverlay::ProductAnnouncement(announcement)) = self.overlay.as_mut() {
-            announcement.scroll = announcement
-                .scroll
-                .min(u16::try_from(self.hits.product_announcement_max_scroll).unwrap_or(u16::MAX));
-        }
-        if let Some(ClientShellOverlay::ReleaseNotes(notes)) = self.overlay.as_mut() {
-            notes.scroll = notes
-                .scroll
-                .min(u16::try_from(self.hits.release_notes_max_scroll).unwrap_or(u16::MAX));
-        }
+        self.compose_client_overlay(&mut frame, &mut occlusion)?;
         if self.endpoint_status(&self.active_endpoint_id) != Some(ClientEndpointStatus::Online) {
             frame.cursor = None;
             self.hits.panes.clear();

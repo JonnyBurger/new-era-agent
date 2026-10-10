@@ -61,7 +61,7 @@ impl ClientShellState {
         layout: ClientShellLayout,
         occlusion: &crate::kitty_graphics::surface::Occlusion,
     ) -> crate::kitty_graphics::GraphicsOutput {
-        let visibility = if self.endpoint_error.is_some() {
+        let visibility = if self.city.is_some() || self.endpoint_error.is_some() {
             crate::kitty_graphics::surface::Visibility::Hidden
         } else if self.hits.popup.is_some() {
             crate::kitty_graphics::surface::Visibility::Popup

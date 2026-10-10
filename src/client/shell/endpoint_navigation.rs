@@ -70,6 +70,7 @@ impl ClientShellState {
                 endpoint_id,
                 target: None,
             });
+            self.close_city(outcome);
         } else {
             let label = self.endpoint_label(&endpoint_id).to_owned();
             self.receive_endpoint_unavailable(format!("{label} is not ready"));
@@ -301,6 +302,7 @@ impl ClientShellState {
                 endpoint_id,
                 target: Some(target),
             });
+            self.close_city(outcome);
         }
         true
     }

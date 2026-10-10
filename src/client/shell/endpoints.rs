@@ -577,7 +577,10 @@ impl ClientShellState {
         self.endpoints[index]
             .agent_presentation
             .project_snapshot_for_generation(&mut snapshot, generation);
-        let presented_surface = if acknowledge_surface && endpoint_id == &self.active_endpoint_id {
+        let presented_surface = if self.city.is_none()
+            && acknowledge_surface
+            && endpoint_id == &self.active_endpoint_id
+        {
             self.pane_surface.as_ref()
         } else {
             None
@@ -654,6 +657,9 @@ impl ClientShellState {
     }
 
     pub(crate) fn acknowledge_active_surface_agents(&mut self, surface: &PaneSurfaceFrame) -> bool {
+        if self.city.is_some() {
+            return false;
+        }
         let Some(index) = self
             .endpoints
             .iter()

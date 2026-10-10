@@ -6,6 +6,21 @@ impl ClientShellState {
         binding: crate::input::KeybindMatch,
         outcome: &mut ClientShellInput,
     ) {
+        if self.city.is_some()
+            && !matches!(
+                binding,
+                crate::input::KeybindMatch::Action(
+                    crate::input::KeybindAction::Detach
+                        | crate::input::KeybindAction::ToggleSidebar
+                        | crate::input::KeybindAction::Help
+                        | crate::input::KeybindAction::Settings
+                        | crate::input::KeybindAction::ReloadConfig
+                        | crate::input::KeybindAction::OpenNotificationTarget
+                )
+            )
+        {
+            self.close_city(outcome);
+        }
         match binding {
             crate::input::KeybindMatch::Action(crate::input::KeybindAction::Detach) => {
                 outcome.detach = true;
@@ -414,6 +429,9 @@ impl ClientShellState {
                 method,
             }),
         });
+        if changes_focus {
+            self.close_city(outcome);
+        }
         true
     }
 

@@ -83,6 +83,7 @@ impl ClientShellState {
         let Some(pane_id) = notification.event.pane_id else {
             return;
         };
+        self.close_city(outcome);
         if notification.endpoint_id == self.active_endpoint_id {
             self.push_endpoint_method(
                 crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
@@ -297,7 +298,7 @@ impl ClientShellState {
         endpoint_id: &ClientEndpointId,
         event: &SemanticNotification,
     ) -> bool {
-        if endpoint_id != &self.active_endpoint_id {
+        if self.city.is_some() || endpoint_id != &self.active_endpoint_id {
             return false;
         }
         let Some(snapshot) = self

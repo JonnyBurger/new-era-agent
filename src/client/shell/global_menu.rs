@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ClientGlobalMenuAction {
     Binding(crate::input::KeybindAction),
+    City,
     WhatsNew,
 }
 
@@ -46,6 +47,7 @@ pub(super) fn global_menu_items(
             ClientGlobalMenuAction::WhatsNew,
         ));
     }
+    items.push(("agent city", ClientGlobalMenuAction::City));
     items.push((
         "detach",
         ClientGlobalMenuAction::Binding(crate::input::KeybindAction::Detach),
@@ -100,6 +102,7 @@ impl ClientShellState {
         }
         self.overlay = None;
         match action {
+            ClientGlobalMenuAction::City => self.open_city(outcome),
             ClientGlobalMenuAction::Binding(binding) => {
                 self.record_binding(crate::input::KeybindMatch::Action(binding), outcome)
             }

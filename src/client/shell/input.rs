@@ -92,10 +92,11 @@ fn push_host_theme_update(
 
 impl ClientShellState {
     pub(crate) fn host_keyboard_report_all_requested(&self) -> bool {
-        matches!(
-            self.mode,
-            ClientShellMode::Prefix | ClientShellMode::Navigate
-        )
+        self.city.is_some()
+            || matches!(
+                self.mode,
+                ClientShellMode::Prefix | ClientShellMode::Navigate
+            )
     }
 
     pub(crate) fn set_host_reports_key_releases(&mut self, reports: bool) {
@@ -240,6 +241,9 @@ impl ClientShellState {
                 }
                 RawInputEvent::Text(text) => {
                     let text = text.into_string();
+                    if self.city.is_some() && self.overlay.is_none() {
+                        continue;
+                    }
                     if matches!(
                         self.overlay,
                         Some(
@@ -251,7 +255,7 @@ impl ClientShellState {
                         self.reconcile_input_source();
                         continue;
                     }
-                    if self.prepare_committed_text(&text, &mut outcome) {
+                    if self.city.is_none() && self.prepare_committed_text(&text, &mut outcome) {
                         self.reconcile_input_source();
                         continue;
                     }
@@ -261,7 +265,7 @@ impl ClientShellState {
                             ClientPaneInputEvent::TextCommit(text),
                             &mut outcome,
                         );
-                    } else if !self.popup_pending {
+                    } else if !self.popup_pending || self.city.is_some() {
                         if self.insert_overlay_text(&text) {
                             outcome.repaint = true;
                         } else if self.overlay.is_none() && self.mode == ClientShellMode::Terminal {
@@ -273,6 +277,9 @@ impl ClientShellState {
                     }
                 }
                 RawInputEvent::Paste(text) => {
+                    if self.city.is_some() && self.overlay.is_none() {
+                        continue;
+                    }
                     if matches!(
                         self.overlay,
                         Some(
@@ -284,7 +291,7 @@ impl ClientShellState {
                         self.reconcile_input_source();
                         continue;
                     }
-                    if self.prepare_committed_text(&text, &mut outcome) {
+                    if self.city.is_none() && self.prepare_committed_text(&text, &mut outcome) {
                         self.reconcile_input_source();
                         continue;
                     }
@@ -294,7 +301,7 @@ impl ClientShellState {
                             ClientPaneInputEvent::Paste(text),
                             &mut outcome,
                         );
-                    } else if !self.popup_pending {
+                    } else if !self.popup_pending || self.city.is_some() {
                         if self.insert_overlay_text(&text) {
                             outcome.repaint = true;
                         } else if self.overlay.is_none() && self.mode == ClientShellMode::Terminal {
@@ -438,7 +445,7 @@ impl ClientShellState {
         }
     }
 
-    fn release_input_leases(&mut self, outcome: &mut ClientShellInput) {
+    pub(super) fn release_input_leases(&mut self, outcome: &mut ClientShellInput) {
         for lease in self.input_leases.remove_source(LOCAL_INPUT_SOURCE) {
             // A press that arrived as plain text (IME commits, and printable keys
             // the host sends as text) reached the pane as text, not as a key
@@ -505,6 +512,9 @@ impl ClientShellState {
     ) {
         match plan {
             crate::input::RepeatPlan::Forwarded(target) => {
+                if self.city.is_some() {
+                    return;
+                }
                 let pane_blocked_by_popup = matches!(&target, ClientInputTarget::Pane(_))
                     && (self.popup_pending || self.popup_terminal_id.is_some());
                 if !pane_blocked_by_popup {
@@ -540,6 +550,9 @@ impl ClientShellState {
     }
 
     pub(super) fn modal_paste_target_active(&self) -> bool {
+        if self.city.is_some() && self.overlay.is_none() {
+            return false;
+        }
         if self.popup_pending
             || self.popup_input_target().is_some()
             || (self.overlay.is_none()
@@ -605,6 +618,10 @@ impl ClientShellState {
         key: &crate::input::TerminalKey,
         outcome: &mut ClientShellInput,
     ) -> Option<ClientInputTarget> {
+        if self.city.is_some() && self.overlay.is_none() && self.mode != ClientShellMode::Prefix {
+            self.route_city_key(key, outcome);
+            return None;
+        }
         if self.handle_modal_paste_shortcut_with(key, outcome, crate::platform::read_clipboard_text)
         {
             return None;
@@ -625,7 +642,7 @@ impl ClientShellState {
         if let Some(target) = self.popup_input_target() {
             return Some(target);
         }
-        if self.popup_pending {
+        if self.popup_pending && self.city.is_none() {
             return None;
         }
         if self.overlay.is_some() {
@@ -686,6 +703,7 @@ impl ClientShellState {
                 };
                 if self.config.keybinds.matches_prefix(key) {
                     self.mode = return_mode;
+                    self.close_city(outcome);
                     outcome.repaint = true;
                     return self.focused_pane_id().map(ClientInputTarget::Pane);
                 }
@@ -700,6 +718,13 @@ impl ClientShellState {
                     self.mode = return_mode;
                     outcome.repaint = true;
                     self.record_binding(binding, outcome);
+                    return None;
+                }
+                if crate::config::terminal_key_matches_combo(
+                    key,
+                    (KeyCode::Char('a'), KeyModifiers::empty()),
+                ) {
+                    self.open_city(outcome);
                     return None;
                 }
                 self.mode = return_mode;
@@ -1065,6 +1090,7 @@ impl ClientShellState {
     fn input_context(&self) -> ClientInputContext {
         ClientInputContext {
             mode: self.mode,
+            city: self.city.is_some(),
             overlay: self.overlay.as_ref().map(ClientShellOverlay::kind),
             popup_terminal_id: self.popup_input_target().and_then(|target| match target {
                 ClientInputTarget::Popup(terminal_id) => Some(terminal_id),
@@ -1087,6 +1113,9 @@ impl ClientShellState {
     pub(crate) fn clipboard_image_target(
         &self,
     ) -> Option<crate::protocol::ClientClipboardImageTarget> {
+        if self.city.is_some() {
+            return None;
+        }
         if matches!(
             self.overlay,
             Some(
@@ -1159,6 +1188,9 @@ impl ClientShellState {
     }
 
     fn popup_input_target(&self) -> Option<ClientInputTarget> {
+        if self.city.is_some() {
+            return None;
+        }
         self.popup_terminal_id
             .as_ref()
             .map(|terminal_id| ClientInputTarget::Popup(terminal_id.clone()))

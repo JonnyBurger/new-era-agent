@@ -1503,8 +1503,11 @@ async fn run_client_loop(
                             continue;
                         }
                         let composed = if let Some(shell) = &mut state.shell {
-                            shell.set_pane_surface(surface);
-                            shell.compose(state.reported_size.0, state.reported_size.1)
+                            shell.receive_pane_surface(
+                                surface,
+                                state.reported_size.0,
+                                state.reported_size.1,
+                            )
                         } else {
                             None
                         };
@@ -1539,6 +1542,7 @@ async fn run_client_loop(
                                 }
                             }
                             Some(shell::ClientPaneSurfacePatchOutcome::Applied(None)) => true,
+                            Some(shell::ClientPaneSurfacePatchOutcome::AppliedHidden) => false,
                             Some(shell::ClientPaneSurfacePatchOutcome::Rejected) | None => false,
                         };
                         apply_client_shell_input_source_changes(

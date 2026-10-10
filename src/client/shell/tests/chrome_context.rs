@@ -420,7 +420,15 @@ fn global_menu_opens_from_sidebar_and_routes_client_actions() {
     assert!(matches!(state.overlay, Some(ClientShellOverlay::Help(_))));
 
     state.overlay = Some(ClientShellOverlay::GlobalMenu(ClientGlobalMenuOverlay {
-        highlighted: 3,
+        highlighted: global_menu::global_menu_items(state.snapshot.as_deref().unwrap())
+            .iter()
+            .position(|(_, action)| {
+                *action
+                    == global_menu::ClientGlobalMenuAction::Binding(
+                        crate::input::KeybindAction::Detach,
+                    )
+            })
+            .unwrap(),
     }));
     let detach = state.handle_input_bytes(b"\r");
     assert!(detach.detach);

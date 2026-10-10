@@ -321,6 +321,7 @@ pub(super) fn render_shell(
             &mut hits,
         );
     }
+    super::city_navigation::render_city_launcher(buffer, layout.sidebar, config, &mut hits);
     if !config.mouse_capture {
         hits.sidebar_divider = Rect::default();
         hits.sidebar_section_divider = Rect::default();

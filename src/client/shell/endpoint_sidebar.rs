@@ -208,7 +208,10 @@ pub(super) fn render_collapsed(
     }
     super::endpoint_agents::render_collapsed(
         buffer,
-        detail_area,
+        Rect {
+            height: detail_area.height.saturating_sub(1),
+            ..detail_area
+        },
         state.endpoints,
         state.active_endpoint_id,
         config,
@@ -555,7 +558,10 @@ pub(super) fn render_expanded(
     }
     super::endpoint_agents::render_expanded(
         buffer,
-        detail_area,
+        Rect {
+            height: detail_area.height.saturating_sub(1),
+            ..detail_area
+        },
         active_snapshot.and_then(|snapshot| snapshot.agent_view_label.as_deref()),
         state.endpoints,
         state.active_endpoint_id,

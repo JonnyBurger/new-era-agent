@@ -432,7 +432,10 @@ pub(crate) fn render_sidebar(
 
     super::render_agent_panel(
         buffer,
-        detail_area,
+        Rect {
+            height: detail_area.height.saturating_sub(1),
+            ..detail_area
+        },
         snapshot,
         config,
         state.agent_scroll,

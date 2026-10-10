@@ -64,6 +64,14 @@ The full keymap and the binding syntax live in the [keybinding reference](/docs/
 
 The Goto picker (`prefix+g`) lists each agent or terminal on its own row, grouped by workspace. Split tabs never hide their panes behind another row. Click a row or press Enter to jump directly to it. Press `/` to search names, agent kinds, tabs, workspaces, branches, or paths; use Up/Down or `j/k` to move between rows when not typing a search. Left/Right jumps to the first agent or terminal in the previous/next workspace section, without wrapping. While editing a search, Left/Right moves the text cursor instead. Outside search, `b/w/i/d` filter blocked, working, idle, or done agents, and `a` shows all terminals again. The selected destination's location and path appear below the list. When the list overflows, use the mouse wheel, click the scrollbar track, or drag its thumb to scroll without opening a destination.
 
+## Agent city (this fork)
+
+Click **city** in the sidebar footer, choose **agent city** from the menu, or press `prefix+a` to open a city overview. Each house represents one agent across your connected machines and workspaces. Roofs stay the same as agent status changes; the label and entrance color show working, blocked, done, or idle. Disconnected machines keep their last-known houses marked offline.
+
+Click a house or select it with the arrow keys and press Enter to open its existing terminal. Tab and Shift+Tab move between houses; Home and End jump to the first and last agent. Use the mouse wheel or PageUp/PageDown to explore larger cities. Esc, `q`, or the close button returns to the terminal. Small windows use a compact agent list with the same controls.
+
+The city does not change agent commands, panes, session persistence, or the Goto picker (`prefix+g`). Configured keybindings take precedence over the city's `prefix+a` shortcut.
+
 ## Editing text fields
 
 Herdr's naming dialogs, worktree branch fields, filters, and copy-mode search support editing at the cursor. These shortcuts apply to Herdr-owned fields, not to the shell or agent inside a pane.
